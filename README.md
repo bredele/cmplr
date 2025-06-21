@@ -17,6 +17,7 @@ Speedy web compiler without the config
 - **Source Maps** - Generates source maps for debugging
 - **Multiple Entry Points** - Supports projects with multiple entry files
 - **Dry Run Mode** - Preview what would be compiled without executing
+- **Optional Type Checking** - Enable strict TypeScript type checking with `--type-check`
 
 Born from the frustration of repeatedly setting up TypeScript, SWC configs, and build tooling for every new module. `cmplr` does all the heavy lifting so you can focus on writing typescript code.
 
@@ -50,6 +51,7 @@ Options:
   --src-dir      Source directory (default: auto-detect)
   --out-dir      Output directory (default: 'dist')
   --no-types     Skip TypeScript declaration generation
+  --type-check   Enable TypeScript type checking (installs TypeScript if needed)
 ```
 
 ## Notes
