@@ -1,0 +1,45 @@
+{
+  "name": "cmplr",
+  "version": "1.0.0",
+  "description": "Speedy web compiler without the config",
+  "bin": {
+    "cmplr": "./dist/cjs/cmplr.js"
+  },
+  "scripts": {
+    "build": "cmplr",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "swc",
+    "compiler",
+    "transpiler",
+    "esm",
+    "commonjs",
+    "typescript",
+    "build"
+  ],
+  "author": "Olivier Wietrich",
+  "license": "MIT",
+  "dependencies": {
+    "@swc/cli": "^0.7.7",
+    "@swc/core": "^1.4.8",
+    "tsconfig-swc": "^1.0.0",
+    "typescript": "^5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.25"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "main": "./dist/cjs/cmplr.js",
+  "module": "./dist/esm/cmplr.js",
+  "types": "./dist/types/cmplr.d.ts",
+  "exports": {
+    "./cmplr": {
+      "import": "./dist/esm/cmplr.js",
+      "require": "./dist/cjs/cmplr.js",
+      "types": "./dist/types/cmplr.d.ts"
+    }
+  }
+}
