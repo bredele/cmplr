@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import * as path from "path";
 import { execSync } from "child_process";
 import convert, { TSConfig } from "tsconfig-swc";
+import install from "@bredele/package-install";
 
 interface SWCConfig {
   jsc: {
@@ -31,6 +32,7 @@ interface CLIArgs {
   srcDir?: string;
   outDir: string;
   noTypes: boolean;
+  typeCheck: boolean;
 }
 
 const fileExists = async (filePath: string): Promise<boolean> => {
@@ -42,6 +44,57 @@ const fileExists = async (filePath: string): Promise<boolean> => {
   }
 };
 
+const hasTypeScriptInstalled = async (): Promise<boolean> => {
+  // Check if TypeScript exists in project's package.json
+  const packageJsonPath = path.join(process.cwd(), "package.json");
+  if (await fileExists(packageJsonPath)) {
+    try {
+      const content = await fs.readFile(packageJsonPath, "utf8");
+      const packageJson = JSON.parse(content);
+      if (packageJson.dependencies?.typescript || packageJson.devDependencies?.typescript) {
+        return true;
+      }
+    } catch {
+      // Continue to fallback check
+    }
+  }
+
+  // Fallback: try to resolve TypeScript
+  try {
+    require.resolve("typescript");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const ensureTypeScriptInstalled = async (): Promise<void> => {
+  if (await hasTypeScriptInstalled()) {
+    return;
+  }
+
+  console.log("TypeScript not found, installing as dev dependency...");
+  try {
+    await install("typescript", true);
+    console.log("TypeScript installed successfully.");
+  } catch (error) {
+    throw new Error(`Failed to install TypeScript: ${error}`);
+  }
+};
+
+const performTypeCheck = async (srcDir: string): Promise<void> => {
+  console.log("Running type check...");
+  try {
+    execSync(`npx tsc --noEmit --rootDir ${srcDir}`, { 
+      stdio: "inherit",
+      cwd: process.cwd()
+    });
+    console.log("Type check passed!");
+  } catch (error) {
+    throw new Error("Type check failed");
+  }
+};
+
 const parseArgs = (): CLIArgs => {
   const args = process.argv.slice(2);
   const parsed: CLIArgs = {
@@ -50,6 +103,7 @@ const parseArgs = (): CLIArgs => {
     version: false,
     outDir: "dist",
     noTypes: false,
+    typeCheck: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -75,6 +129,9 @@ const parseArgs = (): CLIArgs => {
       case "--no-types":
         parsed.noTypes = true;
         break;
+      case "--type-check":
+        parsed.typeCheck = true;
+        break;
       default:
         if (arg.startsWith("--")) {
           console.error(`Unknown option: ${arg}`);
@@ -99,11 +156,13 @@ Options:
   --src-dir      Source directory (default: auto-detect from tsconfig or 'src')
   --out-dir      Output directory (default: 'dist')
   --no-types     Skip TypeScript declaration generation
+  --type-check   Enable TypeScript type checking (installs TypeScript if needed)
 
 Examples:
   cmplr                    # Compile with auto-detected settings (automatically cleans output)
   cmplr --dry-run          # Preview compilation
   cmplr --src-dir lib      # Use 'lib' as source directory
+  cmplr --type-check       # Compile with type checking enabled
 `);
 };
 
@@ -339,6 +398,7 @@ const main = async () => {
     console.log(`  Entry points: ${entryPoints.join(", ")}`);
     console.log(`  TypeScript config: ${tsconfig ? "found" : "not found"}`);
     console.log(`  Generate types: ${!args.noTypes}`);
+    console.log(`  Type check: ${args.typeCheck ? "enabled" : "disabled"}`);
     return;
   }
 
@@ -371,6 +431,12 @@ const main = async () => {
       console.log("Generating TypeScript declarations...");
       const tscCommand = `npx tsc --declaration --emitDeclarationOnly --outDir ${args.outDir}/types`;
       execSync(tscCommand, { stdio: "inherit" });
+    }
+
+    // Perform type checking if requested
+    if (args.typeCheck) {
+      await ensureTypeScriptInstalled();
+      await performTypeCheck(srcDir);
     }
 
     await updatePackageJsonExports(entryPoints, args.outDir, args.noTypes);
