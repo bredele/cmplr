@@ -368,6 +368,13 @@ const updatePackageJsonExports = async (
     }
   }
 
+  // Add or update the "files" field to include the dist folder
+  if (!packageJson.files) {
+    packageJson.files = [outDir];
+  } else if (Array.isArray(packageJson.files) && !packageJson.files.includes(outDir)) {
+    packageJson.files.push(outDir);
+  }
+
   await fs.writeFile(
     packageJsonPath,
     JSON.stringify(packageJson, null, 2) + "\n"
