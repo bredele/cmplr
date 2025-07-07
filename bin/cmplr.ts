@@ -26,6 +26,7 @@ interface SWCConfig {
 }
 
 interface CLIArgs {
+  command: "compile" | "create";
   dryRun: boolean;
   help: boolean;
   version: boolean;
@@ -33,6 +34,8 @@ interface CLIArgs {
   outDir: string;
   noTypes: boolean;
   typeCheck: boolean;
+  // Create command specific
+  projectName?: string;
 }
 
 const fileExists = async (filePath: string): Promise<boolean> => {
@@ -51,7 +54,10 @@ const hasTypeScriptInstalled = async (): Promise<boolean> => {
     try {
       const content = await fs.readFile(packageJsonPath, "utf8");
       const packageJson = JSON.parse(content);
-      if (packageJson.dependencies?.typescript || packageJson.devDependencies?.typescript) {
+      if (
+        packageJson.dependencies?.typescript ||
+        packageJson.devDependencies?.typescript
+      ) {
         return true;
       }
     } catch {
@@ -85,9 +91,9 @@ const ensureTypeScriptInstalled = async (): Promise<void> => {
 const performTypeCheck = async (srcDir: string): Promise<void> => {
   console.log("Running type check...");
   try {
-    execSync(`npx tsc --noEmit --rootDir ${srcDir}`, { 
+    execSync(`npx tsc --noEmit --rootDir ${srcDir}`, {
       stdio: "inherit",
-      cwd: process.cwd()
+      cwd: process.cwd(),
     });
     console.log("Type check passed!");
   } catch (error) {
@@ -98,6 +104,7 @@ const performTypeCheck = async (srcDir: string): Promise<void> => {
 const parseArgs = (): CLIArgs => {
   const args = process.argv.slice(2);
   const parsed: CLIArgs = {
+    command: "compile", // default command
     dryRun: false,
     help: false,
     version: false,
@@ -105,6 +112,20 @@ const parseArgs = (): CLIArgs => {
     noTypes: false,
     typeCheck: false,
   };
+
+  // Check for subcommand as first argument
+  if (args.length > 0 && !args[0].startsWith("-")) {
+    const subcommand = args[0];
+    if (subcommand === "create") {
+      parsed.command = "create";
+      // Get project name as second argument
+      if (args.length > 1 && !args[1].startsWith("-")) {
+        parsed.projectName = args[1];
+      }
+      // Start parsing from index 2 (or 1 if no project name)
+      args.splice(0, parsed.projectName ? 2 : 1);
+    }
+  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -143,13 +164,31 @@ const parseArgs = (): CLIArgs => {
   return parsed;
 };
 
-const showHelp = () => {
-  console.log(`
-cmplr - Speedy web compiler without the config
+const showHelp = (command?: string) => {
+  if (command === "create") {
+    console.log(`
+cmplr create - Create and initialize a new TypeScript project
 
-Usage: cmplr [options]
+Usage: cmplr create [project-name] [options]
 
 Options:
+  --help, -h     Show this help message
+
+Examples:
+  cmplr create my-project  # Create a new project in 'my-project' directory
+  cmplr create             # Create a new project in current directory
+`);
+  } else {
+    console.log(`
+cmplr - Speedy web compiler without the config
+
+Usage: cmplr [command] [options]
+
+Commands:
+  compile        Compile TypeScript/JavaScript files (default)
+  create         Create and initialize a new TypeScript project
+
+Compile Options:
   --dry-run      Show what would be compiled without executing
   --help, -h     Show this help message
   --version, -v  Show version number
@@ -163,7 +202,9 @@ Examples:
   cmplr --dry-run          # Preview compilation
   cmplr --src-dir lib      # Use 'lib' as source directory
   cmplr --type-check       # Compile with type checking enabled
+  cmplr create my-project  # Create a new TypeScript project
 `);
+  }
 };
 
 const showVersion = async () => {
@@ -371,7 +412,10 @@ const updatePackageJsonExports = async (
   // Add or update the "files" field to include the dist folder
   if (!packageJson.files) {
     packageJson.files = [outDir];
-  } else if (Array.isArray(packageJson.files) && !packageJson.files.includes(outDir)) {
+  } else if (
+    Array.isArray(packageJson.files) &&
+    !packageJson.files.includes(outDir)
+  ) {
     packageJson.files.push(outDir);
   }
 
@@ -381,16 +425,169 @@ const updatePackageJsonExports = async (
   );
 };
 
+const createProject = async (projectName?: string) => {
+  // Determine project directory
+  const projectDir = projectName
+    ? path.join(process.cwd(), projectName)
+    : process.cwd();
+  const actualProjectName = projectName || path.basename(process.cwd());
+
+  // Create project directory if it doesn't exist
+  if (projectName && !(await fileExists(projectDir))) {
+    await fs.mkdir(projectDir, { recursive: true });
+    console.log(`Created project directory: ${projectName}`);
+  }
+
+  // Create lib directory
+  const libDir = path.join(projectDir, "lib");
+  if (!(await fileExists(libDir))) {
+    await fs.mkdir(libDir, { recursive: true });
+    console.log(`Created lib directory`);
+  }
+
+  // Create or update package.json
+  const packageJsonPath = path.join(projectDir, "package.json");
+  let packageJson: any;
+
+  if (await fileExists(packageJsonPath)) {
+    // Read existing package.json and update scripts
+    const content = await fs.readFile(packageJsonPath, "utf8");
+    packageJson = JSON.parse(content);
+
+    // Update scripts
+    if (!packageJson.scripts) {
+      packageJson.scripts = {};
+    }
+    packageJson.scripts.build = "cmplr --type-check";
+    packageJson.scripts.test = "node --test dist/cjs/**/*.test.js";
+
+    await fs.writeFile(
+      packageJsonPath,
+      JSON.stringify(packageJson, null, 2) + "\n"
+    );
+    console.log(`Updated package.json scripts`);
+  } else {
+    // Create new package.json
+    packageJson = {
+      name: actualProjectName,
+      version: "1.0.0",
+      files: ["dist"],
+      scripts: {
+        build: "cmplr --type-check",
+        test: "node --test dist/cjs/**/*.test.js",
+      },
+    };
+
+    await fs.writeFile(
+      packageJsonPath,
+      JSON.stringify(packageJson, null, 2) + "\n"
+    );
+    console.log(`Created package.json`);
+  }
+
+  // Create tsconfig.json
+  const tsconfigPath = path.join(projectDir, "tsconfig.json");
+  const tsconfigJson = {
+    compilerOptions: {
+      target: "ES2021",
+      lib: ["ES2021"],
+      types: ["node"],
+      module: "CommonJS",
+      moduleResolution: "node",
+      esModuleInterop: true,
+      allowSyntheticDefaultImports: true,
+      strict: true,
+      skipLibCheck: true,
+      forceConsistentCasingInFileNames: true,
+      declaration: true,
+      declarationMap: true,
+      outDir: "dist",
+      rootDir: "lib",
+      noEmit: false,
+      resolveJsonModule: true,
+    },
+    include: ["lib/**/*"],
+    exclude: ["node_modules", "dist"],
+  };
+
+  if (!(await fileExists(tsconfigPath))) {
+    await fs.writeFile(
+      tsconfigPath,
+      JSON.stringify(tsconfigJson, null, 2) + "\n"
+    );
+    console.log(`Created tsconfig.json`);
+  } else {
+    console.log(`tsconfig.json already exists, skipping`);
+  }
+
+  // Create lib/index.ts
+  const indexPath = path.join(libDir, "index.ts");
+  if (!(await fileExists(indexPath))) {
+    await fs.writeFile(indexPath, "");
+    console.log(`Created lib/index.ts`);
+  } else {
+    console.log(`lib/index.ts already exists, skipping`);
+  }
+
+  // Create lib/index.test.ts
+  const testPath = path.join(libDir, "index.test.ts");
+  const testContent = `import test from 'node:test';
+import assert from 'node:assert';
+`;
+
+  if (!(await fileExists(testPath))) {
+    await fs.writeFile(testPath, testContent);
+    console.log(`Created lib/index.test.ts`);
+  } else {
+    console.log(`lib/index.test.ts already exists, skipping`);
+  }
+
+  // Install dependencies
+  console.log(`\nInstalling dependencies...`);
+  try {
+    // Change to project directory for installation
+    const originalCwd = process.cwd();
+    process.chdir(projectDir);
+
+    await install("cmplr");
+    await install("@types/node", true); // true for dev dependency
+
+    // Change back to original directory
+    process.chdir(originalCwd);
+
+    console.log(`Dependencies installed successfully!`);
+  } catch (error) {
+    console.warn(`Warning: Failed to install dependencies: ${error}`);
+    console.warn(
+      `You can manually install them with: npm install cmplr && npm install --save-dev @types/node`
+    );
+  }
+
+  console.log(`\nProject '${actualProjectName}' initialized successfully!`);
+  console.log(`\nNext steps:`);
+  if (projectName) {
+    console.log(`  cd ${projectName}`);
+  }
+  console.log(`  npm run build`);
+  console.log(`  npm test`);
+};
+
 const main = async () => {
   const args = parseArgs();
 
   if (args.help) {
-    showHelp();
+    showHelp(args.command);
     return;
   }
 
   if (args.version) {
     await showVersion();
+    return;
+  }
+
+  // Handle create command
+  if (args.command === "create") {
+    await createProject(args.projectName);
     return;
   }
 
